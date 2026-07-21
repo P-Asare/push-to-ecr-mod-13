@@ -1,4 +1,4 @@
-name: Build and Push to ECR
+name: Build and Push to Amazon ECR
 
 on:
   push:
@@ -21,104 +21,97 @@ concurrency:
 
 jobs:
   build-and-push:
-    name: Build and Push to ECR
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          persist-credentials: false
 
-      - name: Validate inputs
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Validate Required Inputs
+        shell: bash
         run: |
           errors=0
+
           if [ -z "$AWS_REGION" ]; then
-            echo "::error::AWS_REGION is not set"
+            echo "::error::AWS_REGION variable is not configured."
             errors=1
           fi
+
           if [ -z "$ECR_REPO" ]; then
-            echo "::error::ECR_REPO is not set"
+            echo "::error::ECR_REPO variable is not configured."
             errors=1
           fi
+
           if [ -z "${{ secrets.AWS_ROLE_ARN }}" ]; then
-            echo "::error::AWS_ROLE_ARN secret is not set"
+            echo "::error::AWS_ROLE_ARN secret is not configured."
             errors=1
           fi
+
           if [ $errors -ne 0 ]; then
             exit 1
           fi
 
-      - name: Configure OIDC
-        uses: aws-actions/configure-aws-credentials@v6
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-          mask-aws-account-id: true
 
-      - name: ECR Login
+      - name: Login to Amazon ECR
+        id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
-        with:
-          mask-account-id: true
-
-      - name: Derive image tags
-        id: derive
-        run: |
-          SHA_TAG=$(echo "${{ github.sha }}" | cut -c1-7)
-          echo "sha_tag=$SHA_TAG" >> $GITHUB_OUTPUT
-          echo "latest_tag=latest" >> $GITHUB_OUTPUT
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@v3
 
-      - name: Build and Push
-        uses: docker/build-push-action@v7
+      - name: Generate Image Tags
+        id: meta
+        shell: bash
+        run: |
+          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
+
+          echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+
+          echo "image=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
           push: true
-          tags: |
-            ${{ env.ECR_REPO }}:${{ steps.derive.outputs.sha_tag }}
-            ${{ env.ECR_REPO }}:${{ steps.derive.outputs.latest_tag }}
-          cache-from: type=gha,mode=max
-          cache-to: type=gha,mode=max
           provenance: false
 
-      - name: ECR Scan Waiter
-        id: wait-scan
-        run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          IMAGE_TAG=$(echo "${{ github.sha }}" | cut -c1-7)
-          echo "Waiting for scan to complete on image: $IMAGE_TAG"
-          aws ecr wait image-scan-complete \
-            --registry-id $ACCOUNT_ID \
-            --repository-name $(echo "${{ env.ECR_REPO }}" | cut -d/ -f2) \
-            --image-tag $IMAGE_TAG \
-            --region ${{ env.AWS_REGION }}
-          echo "scan_complete=true" >> $GITHUB_OUTPUT
+          tags: |
+            ${{ steps.meta.outputs.image }}:latest
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.short_sha }}
 
-      - name: Get scan findings
-        id: scan-findings
-        if: success() || failure()
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Wait for Image Scan
+        shell: bash
         run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          IMAGE_TAG=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "Waiting for ECR image scan..."
+
+          aws ecr wait image-scan-complete \
+            --repository-name "$ECR_REPO" \
+            --image-id imageTag=${{ steps.meta.outputs.short_sha }} \
+            --region "$AWS_REGION"
+
+      - name: Check Scan Results
+        shell: bash
+        run: |
           FINDINGS=$(aws ecr describe-image-scan-findings \
-            --registry-id $ACCOUNT_ID \
-            --repository-name $(echo "${{ env.ECR_REPO }}" | cut -d/ -f2) \
-            --image-tag $IMAGE_TAG \
-            --region ${{ env.AWS_REGION }} \
+            --repository-name "$ECR_REPO" \
+            --image-id imageTag=${{ steps.meta.outputs.short_sha }} \
+            --region "$AWS_REGION" \
             --query 'length(imageScanFindings.findings[?severity==`CRITICAL` || severity==`HIGH`])' \
             --output text)
+
           if [ "$FINDINGS" -gt 0 ]; then
-            echo "::error::Found $FINDINGS CRITICAL/HIGH vulnerabilities"
-            aws ecr describe-image-scan-findings \
-              --registry-id $ACCOUNT_ID \
-              --repository-name $(echo "${{ env.ECR_REPO }}" | cut -d/ -f2) \
-              --image-tag $IMAGE_TAG \
-              --region ${{ env.AWS_REGION }} \
-              --query 'imageScanFindings.findings[?severity==`CRITICAL` || severity==`HIGH`]' \
-              --output table
+            echo "::error::Found $FINDINGS HIGH/CRITICAL vulnerabilities."
             exit 1
           fi
-          echo "No CRITICAL/HIGH vulnerabilities found"
+
+          echo "No HIGH or CRITICAL vulnerabilities detected."
