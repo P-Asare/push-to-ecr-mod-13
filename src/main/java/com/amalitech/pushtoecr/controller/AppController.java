@@ -23,6 +23,9 @@ public class AppController {
     @Value("${app.description}")
     private String appDescription;
 
+    @Value("${app.author}")
+    private String appAuthor;
+
     @GetMapping("/health")
     public ResponseEntity<HealthResponse> health() {
         long uptimeSeconds = Duration.ofMillis(ManagementFactory.getRuntimeMXBean().getUptime()).toSeconds();
@@ -36,6 +39,7 @@ public class AppController {
                 appName,
                 appVersion,
                 appDescription,
+                appAuthor,
                 System.getProperty("java.version"),
                 startedAt
         );
@@ -43,5 +47,5 @@ public class AppController {
     }
 
     public record HealthResponse(String status, Instant timestamp, long uptimeSeconds) {}
-    public record InfoResponse(String name, String version, String description, String javaVersion, Instant buildTimestamp) {}
+    public record InfoResponse(String name, String version, String description, String author, String javaVersion, Instant buildTimestamp) {}
 }
