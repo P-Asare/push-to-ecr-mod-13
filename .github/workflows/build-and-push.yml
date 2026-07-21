@@ -57,6 +57,12 @@ jobs:
           echo "Ref: ${{ github.ref }}"
           echo "Actor: ${{ github.actor }}"
 
+      - name: Verify Role ARN
+        run: |
+          ROLE="${{ secrets.AWS_ROLE_ARN }}"
+          echo "Role ARN length: ${#ROLE}"
+          echo "Role name: ${ROLE##*/}" 
+
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
