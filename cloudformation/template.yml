@@ -1,0 +1,79 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >
+  Amazon ECR Repository and GitHub Actions IAM Role.
+
+Resources:
+
+  ECRRepository:
+
+    Type: AWS::ECR::Repository
+
+    Properties:
+
+      RepositoryName: ecr-lab-repo
+
+      ImageTagMutability: MUTABLE
+
+      ImageScanningConfiguration:
+        ScanOnPush: false
+
+      EncryptionConfiguration:
+        EncryptionType: AES256
+
+      Tags:
+        - Key: Project
+          Value: ECR Lab
+
+        - Key: ManagedBy
+          Value: CloudFormation
+
+        - Key: mod
+          Value: mod-13
+
+  # GitHub Actions Role
+
+  ECRServiceRole:
+    Type: AWS::IAM::Role
+
+    Properties:
+
+      RoleName: ecr-service-role
+
+      AssumeRolePolicyDocument:
+
+        Version: "2012-10-17"
+
+        Statement:
+
+          - Effect: Allow
+
+            Principal:
+
+              Federated:
+                !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+
+            Action:
+              - sts:AssumeRoleWithWebIdentity
+
+            Condition:
+
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+
+              StringLike:
+                token.actions.githubusercontent.com:sub: repo:P-Asare@86783671/push-to-ecr-mod-13@1306116194:ref:refs/heads/main
+
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess
+
+Outputs:
+
+  RepositoryName:
+    Value: !Ref ECRRepository
+
+  RepositoryUri:
+    Value: !GetAtt ECRRepository.RepositoryUri
+
+  RoleArn:
+    Value: !GetAtt ECRServiceRole.Arn
