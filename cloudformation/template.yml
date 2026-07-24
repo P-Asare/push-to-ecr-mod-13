@@ -21,6 +21,25 @@ Resources:
       EncryptionConfiguration:
         EncryptionType: AES256
 
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep latest 5 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 5
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+
       Tags:
         - Key: Project
           Value: ECR Lab
