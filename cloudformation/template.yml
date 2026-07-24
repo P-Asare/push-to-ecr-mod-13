@@ -16,7 +16,7 @@ Resources:
       ImageTagMutability: MUTABLE
 
       ImageScanningConfiguration:
-        ScanOnPush: false
+        ScanOnPush: true
 
       EncryptionConfiguration:
         EncryptionType: AES256
